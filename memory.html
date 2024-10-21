@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memory Game</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            position: relative;
+        }
+        .grid {
+            display: grid;
+            gap: 1px;
+            width: 90vw;
+            height: 90vh;
+        }
+        .cell {
+            perspective: 1000px;
+        }
+        .card {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.6s;
+            cursor: pointer;
+        }
+        .card .front, .card .back {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .card .front {
+            background-color: white;
+            color: black;
+            z-index: 2;
+            transform: rotateY(180deg);
+        }
+        .card .back {
+            background-color: lightgray;
+            color: black;
+        }
+        .card.flipped {
+            transform: rotateY(180deg);
+        }
+        .card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            cursor: pointer;
+        }
+        .card.matched .front {
+            background-color: #90ee90; /* Light green */
+        }
+        .card .back img {
+            width: 80%;
+            height: 80%;
+            object-fit: contain;
+        }
+        #congrats-message {
+            display: none;
+            text-align: center;
+            font-size: 24px;
+            margin-top: 20px;
+        }
+        #restart-button {
+            display: none;
+            margin-top: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #loading-spinner {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 50px;
+            height: 50px;
+        }
+        .grid-size-buttons {
+            margin-bottom: 20px;
+        }
+        .grid-size-buttons button {
+            margin: 0 5px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .grid-size-buttons button.selected {
+            background-color: #0078d4;
+            color: white;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
+</head>
+<body>
+    <div class="grid-size-buttons">
+        <label>Choose grid size:</label>
+        <button data-size="4x4">4x4</button>
+        <button data-size="6x6">6x6</button>
+        <button data-size="8x8">8x8</button>
+    </div>
+    <img id="loading-spinner" src="https://i.gifer.com/ZZ5H.gif" alt="Loading...">
+    <div class="grid" id="grid"></div>
+    <div id="congrats-message">Congratulations! You've matched all the cards!</div>
+    <button id="restart-button">Restart</button>
+
+    <script>
+        const gridSizeButtons = document.querySelectorAll('.grid-size-buttons button');
+        const congratsMessage = document.getElementById('congrats-message');
+        const restartButton = document.getElementById('restart-button');
+        const loadingSpinner = document.getElementById('loading-spinner');
+
+        gridSizeButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                gridSizeButtons.forEach(btn => btn.classList.remove('selected'));
+                this.classList.add('selected');
+                const size = this.getAttribute('data-size');
+                window.location.search = `?size=${size}`;
+            });
+        });
+
+        restartButton.addEventListener('click', function() {
+            const params = new URLSearchParams(window.location.search);
+            const size = params.get('size');
+            window.location.search = `?size=${size}`;
+        });
+
+        function getGridSize() {
+            const params = new URLSearchParams(window.location.search);
+            const size = params.get('size') || '8x8';
+            const [rows, cols] = size.split('x').map(Number);
+            return { rows, cols };
+        }
+
+        async function getRandomPokemonImages(count) {
+            const imageUrls = [];
+            while (imageUrls.length < count) {
+                const randomId = Math.floor(Math.random() * 898) + 1;
+                const response = await fetch(`https://pokeapi.co/api/v2/pokemon/${randomId}`);
+                const data = await response.json();
+                const imageUrl = data.sprites.front_default;
+                if (!imageUrls.includes(imageUrl)) {
+                    imageUrls.push(imageUrl);
+                }
+            }
+            return imageUrls;
+        }
+
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        function checkAllMatched() {
+            const matchedCards = document.querySelectorAll('.card.matched');
+            const totalCards = document.querySelectorAll('.card').length;
+            if (matchedCards.length === totalCards) {
+                congratsMessage.style.display = 'block';
+                restartButton.style.display = 'block';
+                confetti();
+            }
+        }
+
+        async function initializeGrid() {
+            loadingSpinner.style.display = 'block';
+            const grid = document.getElementById('grid');
+            const { rows, cols } = getGridSize();
+            grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+            grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+
+            const totalCells = rows * cols;
+            const imageCount = totalCells / 2;
+            const imageUrls = await getRandomPokemonImages(imageCount);
+            const pairedImages = shuffle([...imageUrls, ...imageUrls]);
+
+            let flippedCards = [];
+            let lockBoard = false;
+
+            for (let i = 0; i < totalCells; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+
+                const card = document.createElement('div');
+                card.className = 'card';
+
+                const front = document.createElement('div');
+                front.className = 'front';
+
+                const back = document.createElement('div');
+                back.className = 'back';
+                const backImg = document.createElement('img');
+                backImg.src = 'https://upload.wikimedia.org/wikipedia/commons/9/98/International_Pokémon_logo.svg';
+                back.appendChild(backImg);
+
+                card.appendChild(front);
+                card.appendChild(back);
+                cell.appendChild(card);
+                grid.appendChild(cell);
+
+                const img = document.createElement('img');
+                img.src = pairedImages[i];
+                front.appendChild(img);
+
+                card.addEventListener('click', () => {
+                    if (lockBoard || card.classList.contains('flipped')) return;
+
+                    card.classList.add('flipped');
+                    flippedCards.push(card);
+
+                    if (flippedCards.length === 2) {
+                        lockBoard = true;
+                        setTimeout(() => {
+                            const [firstCard, secondCard] = flippedCards;
+                            const firstImage = firstCard.querySelector('.front img').src;
+                            const secondImage = secondCard.querySelector('.front img').src;
+
+                            if (firstImage === secondImage) {
+                                firstCard.classList.add('matched');
+                                secondCard.classList.add('matched');
+                                checkAllMatched();
+                            } else {
+                                firstCard.classList.remove('flipped');
+                                secondCard.classList.remove('flipped');
+                            }
+
+                            flippedCards = [];
+                            lockBoard = false;
+                        }, 1000);
+                    }
+                });
+            }
+            loadingSpinner.style.display = 'none';
+        }
+
+        if (window.location.search.includes('size')) {
+            initializeGrid();
+            const params = new URLSearchParams(window.location.search);
+            const size = params.get('size');
+            document.querySelector(`button[data-size="${size}"]`).classList.add('selected');
+        }
+    </script>
+</body>
+</html>
